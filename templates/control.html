@@ -1,0 +1,1008 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Remote Desktop Control</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background: #0f172a;
+        color: #e2e8f0;
+      }
+      .topbar {
+        background: #111827;
+        padding: 12px 20px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      select, button {
+        padding: 10px 14px;
+        border-radius: 8px;
+        border: 1px solid #334155;
+        background: #1e293b;
+        color: white;
+      }
+      button {
+        cursor: pointer;
+      }
+      .screen-wrapper {
+        display: flex;
+        justify-content: center;
+        padding: 20px;
+        overflow: auto;
+      }
+      canvas {
+        border: 2px solid #334155;
+        background: #020617;
+        max-width: 100%;
+        max-height: calc(100vh - 120px);
+        box-shadow: 0 12px 28px rgba(0,0,0,0.35);
+        cursor: crosshair;
+      }
+      .status {
+        margin-left: auto;
+        color: #93c5fd;
+      }
+      .screen-wrapper:fullscreen {
+        background: #020617;
+        padding: 20px;
+      }
+      body:not(.screen-popup) .screen-wrapper {
+        display: none;
+      }
+      video {
+        display: none;
+      }
+      .terminal-panel {
+        width: min(900px, calc(100vw - 40px));
+        padding: 0;
+        border: 1px solid #3f3f46;
+        background: #050505;
+        box-shadow: inset 0 0 0 1px #18181b;
+      }
+      .terminal-panel::backdrop {
+        background: rgba(0, 0, 0, 0.7);
+      }
+      body.terminal-popup {
+        overflow: hidden;
+        background: #050505;
+      }
+      body.terminal-popup .topbar,
+      body.terminal-popup .screen-wrapper {
+        display: none;
+      }
+      body.terminal-popup .terminal-panel {
+        display: block;
+        position: static;
+        width: 100vw;
+        height: 100vh;
+        max-width: none;
+        max-height: none;
+        border: 0;
+      }
+      body.terminal-popup .terminal-output {
+        height: calc(100vh - 36px);
+      }
+      body.screen-popup {
+        overflow: hidden;
+        background: #020617;
+      }
+      body.screen-popup .topbar,
+      body.screen-popup .terminal-panel {
+        display: none;
+      }
+      body.screen-popup .screen-wrapper {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+        padding: 0;
+      }
+      body.screen-popup video {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        background: #020617;
+      }
+      body.screen-popup canvas {
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        width: 100%;
+        height: 100%;
+        max-width: 100vw;
+        max-height: 100vh;
+        border: 0;
+        opacity: 0;
+      }
+      body.file-popup {
+        overflow: hidden;
+        background: #f3f4f6;
+        color: #1f2937;
+      }
+      body.file-popup .topbar,
+      body.file-popup .screen-wrapper,
+      body.file-popup .terminal-panel {
+        display: none;
+      }
+      body.file-popup .file-manager {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        background: #f3f4f6;
+      }
+      body.file-popup .file-toolbar {
+        margin: 0;
+        padding: 10px;
+        background: #e5e7eb;
+        border-bottom: 1px solid #cbd5e1;
+      }
+      body.file-popup .file-path {
+        background: white;
+        color: #111827;
+        border-color: #9ca3af;
+      }
+      body.file-popup .file-list {
+        height: calc(100vh - 112px);
+        max-height: none;
+        background: white;
+        color: #1f2937;
+      }
+      body.file-popup .file-row {
+        padding: 9px 12px;
+        border-bottom-color: #e5e7eb;
+      }
+      .terminal-titlebar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 10px;
+        background: #18181b;
+        color: #d4d4d8;
+        font: 12px "Segoe UI", sans-serif;
+      }
+      .terminal-titlebar button {
+        padding: 4px 8px;
+        border-radius: 3px;
+        border-color: #52525b;
+        background: #27272a;
+        font-size: 12px;
+      }
+      .terminal-output {
+        height: 230px;
+        margin: 0;
+        padding: 12px;
+        overflow: auto;
+        white-space: pre-wrap;
+        outline: none;
+        background: #050505;
+        color: #f5f5f5;
+        cursor: text;
+        font: 14px Consolas, "Lucida Console", monospace;
+        line-height: 1.35;
+      }
+      .terminal-caret {
+        display: inline-block;
+        width: 8px;
+        height: 1.1em;
+        vertical-align: -0.15em;
+        background: #f5f5f5;
+        animation: terminal-caret-blink 1s steps(1, end) infinite;
+      }
+      .file-manager {
+        margin: 0 20px 20px;
+        padding: 12px;
+        background: #111827;
+        border: 1px solid #334155;
+      }
+      body:not(.file-popup) .file-manager {
+        display: none;
+      }
+      .file-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+      .file-path {
+        flex: 1 1 280px;
+        min-width: 180px;
+        padding: 9px 12px;
+        border: 1px solid #334155;
+        border-radius: 6px;
+        background: #020617;
+        color: #e2e8f0;
+        font: 13px Consolas, monospace;
+      }
+      .file-list {
+        max-height: 220px;
+        overflow: auto;
+        background: #020617;
+        font: 13px Consolas, monospace;
+      }
+      .file-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 9px;
+        border-bottom: 1px solid #1e293b;
+      }
+      .file-row span:first-child { flex: 1; }
+      body.terminal-popup .file-manager,
+      body.screen-popup .file-manager { display: none; }
+      @keyframes terminal-caret-blink {
+        50% { opacity: 0; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="topbar">
+      <label for="clientSelect">Máquina:</label>
+      <select id="clientSelect"></select>
+      <button id="connectBtn">Conectar</button>
+      <button id="terminalBtn" type="button">Terminal</button>
+      <button id="screenBtn" type="button">Ver Tela</button>
+      <button id="cameraBtn" type="button">Ver Câmera</button>
+      <button id="filesBtn" type="button">Explorar Arquivos</button>
+      <button id="fullscreenBtn" type="button">Tela cheia</button>
+      <span class="status" id="status">Aguardando conexão</span>
+    </div>
+
+    <div class="screen-wrapper">
+      <video id="screenVideo" autoplay muted playsinline></video>
+      <canvas id="screenCanvas" width="1280" height="720"></canvas>
+    </div>
+
+    <section class="file-manager">
+      <div class="file-toolbar">
+        <input class="file-path" id="filePathInput" placeholder="C:\\Users\\..." />
+        <button id="listFilesBtn" type="button">Listar</button>
+        <button id="installFfmpegBtn" type="button">Instalar FFmpeg</button>
+        <label><input id="useFfmpeg" type="checkbox" /> Usar FFmpeg</label>
+      </div>
+      <div class="file-toolbar">
+        <input class="file-path" id="uploadDestination" placeholder="Destino remoto, ex.: C:\\Temp\\arquivo.zip" />
+        <input id="uploadFileInput" type="file" />
+        <button id="uploadFileBtn" type="button">Enviar</button>
+      </div>
+      <div class="file-list" id="fileList">Selecione um cliente e clique em Listar.</div>
+    </section>
+
+    <dialog class="terminal-panel" id="terminalDialog">
+      <div class="terminal-titlebar">
+        <span>Command Prompt</span>
+        <div>
+          <button id="clearTerminalBtn" type="button">Limpar</button>
+          <button id="closeTerminalBtn" type="button">Fechar</button>
+        </div>
+      </div>
+      <pre class="terminal-output" id="terminalOutput" tabindex="0" contenteditable="true" spellcheck="false" aria-label="Terminal do Windows"><span id="terminalText"></span><span class="terminal-caret" id="terminalCaret" aria-hidden="true"></span></pre>
+    </dialog>
+
+    <script>
+      const canvas = document.getElementById('screenCanvas');
+      const ctx = canvas.getContext('2d');
+      const select = document.getElementById('clientSelect');
+      const statusLabel = document.getElementById('status');
+      const terminalParams = new URLSearchParams(window.location.search);
+      const terminalPopup = terminalParams.get('terminal') === '1';
+      const screenPopup = terminalParams.get('screen') === '1';
+      const filePopup = terminalParams.get('files') === '1';
+      const screenWrapper = document.querySelector('.screen-wrapper');
+      const screenVideo = document.getElementById('screenVideo');
+      const terminalBtn = document.getElementById('terminalBtn');
+      const screenBtn = document.getElementById('screenBtn');
+      const cameraBtn = document.getElementById('cameraBtn');
+      const filesBtn = document.getElementById('filesBtn');
+      const terminalDialog = document.getElementById('terminalDialog');
+      const fullscreenBtn = document.getElementById('fullscreenBtn');
+      const terminalOutput = document.getElementById('terminalOutput');
+      const terminalText = document.getElementById('terminalText');
+      const terminalCaret = document.getElementById('terminalCaret');
+      const clearTerminalBtn = document.getElementById('clearTerminalBtn');
+      const closeTerminalBtn = document.getElementById('closeTerminalBtn');
+      const filePathInput = document.getElementById('filePathInput');
+      const listFilesBtn = document.getElementById('listFilesBtn');
+      const installFfmpegBtn = document.getElementById('installFfmpegBtn');
+      const useFfmpeg = document.getElementById('useFfmpeg');
+      const uploadDestination = document.getElementById('uploadDestination');
+      const uploadFileInput = document.getElementById('uploadFileInput');
+      const uploadFileBtn = document.getElementById('uploadFileBtn');
+      const fileList = document.getElementById('fileList');
+
+      let socket = null;
+      let selectedClientId = terminalParams.get('client_id');
+      let clientDetails = {};
+      let currentFrame = null;
+      let currentWidth = 1280;
+      let currentHeight = 720;
+      let terminalOpen = terminalPopup;
+      let screenOpen = screenPopup;
+      const filesOpen = filePopup;
+      const downloadBuffers = new Map();
+      let terminalRows = [];
+      let terminalRow = 0;
+      let terminalColumn = 0;
+      let terminalSavedRow = 0;
+      let terminalSavedColumn = 0;
+
+      if (terminalPopup) {
+        const user = terminalParams.get('user') || 'unknown';
+        const ip = terminalParams.get('ip') || 'unknown';
+        document.body.classList.add('terminal-popup');
+        document.title = `Terminal conectado à ${user}:${ip}`;
+      } else if (screenPopup) {
+        const user = terminalParams.get('user') || 'unknown';
+        const ip = terminalParams.get('ip') || 'unknown';
+        document.body.classList.add('screen-popup');
+        document.title = `Tela conectada à ${user}:${ip}`;
+      } else if (filePopup) {
+        const user = terminalParams.get('user') || 'unknown';
+        const ip = terminalParams.get('ip') || 'unknown';
+        document.body.classList.add('file-popup');
+        document.title = `Explorador de arquivos - ${user}:${ip}`;
+        filePathInput.value = terminalParams.get('path') || '';
+      }
+
+      function resetTerminalScreen() {
+        terminalRows = Array.from({ length: 40 }, () => []);
+        terminalRow = 0;
+        terminalColumn = 0;
+        terminalSavedRow = 0;
+        terminalSavedColumn = 0;
+        renderTerminalScreen();
+      }
+
+      function ensureTerminalRow(row) {
+        while (terminalRows.length <= row) terminalRows.push([]);
+      }
+
+      function renderTerminalScreen() {
+        terminalText.textContent = terminalRows
+          .map((line) => line.join('').replace(/ +$/, ''))
+          .join('\n')
+          .replace(/\n+$/, '');
+        terminalCaret.hidden = !terminalOpen;
+        terminalOutput.scrollTop = terminalOutput.scrollHeight;
+      }
+
+      function writeTerminalOutput(data) {
+        let index = 0;
+        while (index < data.length) {
+          const character = data[index];
+
+          if (character === '\u001b') {
+            if (data[index + 1] === ']') {
+              const bell = data.indexOf('\u0007', index + 2);
+              const stringTerminator = data.indexOf('\u001b\\', index + 2);
+              const end = bell >= 0 && (stringTerminator < 0 || bell < stringTerminator)
+                ? bell + 1
+                : stringTerminator >= 0 ? stringTerminator + 2 : data.length;
+              index = end;
+              continue;
+            }
+
+            if (data[index + 1] === '[') {
+              let end = index + 2;
+              while (end < data.length && !(/[\x40-\x7e]/.test(data[end]))) end += 1;
+              const final = data[end] || '';
+              const parameters = data.slice(index + 2, end).replace(/^\?/, '').split(';').map(Number);
+              const first = parameters[0] || 1;
+
+              if (final === 'H' || final === 'f') {
+                terminalRow = Math.max(0, (parameters[0] || 1) - 1);
+                terminalColumn = Math.max(0, (parameters[1] || 1) - 1);
+                ensureTerminalRow(terminalRow);
+              } else if (final === 'J' && (parameters[0] === 2 || parameters[0] === 3)) {
+                resetTerminalScreen();
+              } else if (final === 'K') {
+                ensureTerminalRow(terminalRow);
+                if (parameters[0] === 2) {
+                  terminalRows[terminalRow] = [];
+                  terminalColumn = 0;
+                } else if (parameters[0] === 1) {
+                  terminalRows[terminalRow].splice(0, terminalColumn + 1);
+                } else {
+                  terminalRows[terminalRow].splice(terminalColumn);
+                }
+              } else if (final === 'P' || final === 'X') {
+                ensureTerminalRow(terminalRow);
+                terminalRows[terminalRow].splice(terminalColumn, first, ...Array(first).fill(' '));
+              } else if (final === '@') {
+                ensureTerminalRow(terminalRow);
+                terminalRows[terminalRow].splice(terminalColumn, 0, ...Array(first).fill(' '));
+              } else if (final === 'd') {
+                terminalRow = Math.max(0, first - 1);
+                ensureTerminalRow(terminalRow);
+              } else if (final === 'E') {
+                terminalRow += first;
+                terminalColumn = 0;
+                ensureTerminalRow(terminalRow);
+              } else if (final === 'F') {
+                terminalRow = Math.max(0, terminalRow - first);
+                terminalColumn = 0;
+              } else if (final === 's') {
+                terminalSavedRow = terminalRow;
+                terminalSavedColumn = terminalColumn;
+              } else if (final === 'u') {
+                terminalRow = terminalSavedRow;
+                terminalColumn = terminalSavedColumn;
+              } else if (final === 'A') {
+                terminalRow = Math.max(0, terminalRow - first);
+              } else if (final === 'B') {
+                terminalRow += first;
+                ensureTerminalRow(terminalRow);
+              } else if (final === 'C') {
+                terminalColumn += first;
+              } else if (final === 'D') {
+                terminalColumn = Math.max(0, terminalColumn - first);
+              } else if (final === 'G') {
+                terminalColumn = Math.max(0, first - 1);
+              }
+
+              index = end < data.length ? end + 1 : data.length;
+              continue;
+            }
+
+            index += 2;
+            continue;
+          }
+
+          ensureTerminalRow(terminalRow);
+          if (character === '\r') {
+            terminalColumn = 0;
+          } else if (character === '\n') {
+            terminalRow += 1;
+            terminalColumn = 0;
+            ensureTerminalRow(terminalRow);
+          } else if (character === '\b' || character === '\u007f') {
+            terminalColumn = Math.max(0, terminalColumn - 1);
+          } else if (character >= ' ') {
+            terminalRows[terminalRow][terminalColumn] = character;
+            terminalColumn += 1;
+          }
+          index += 1;
+        }
+        renderTerminalScreen();
+      }
+
+      function prepareHistoryNavigation() {
+        ensureTerminalRow(terminalRow);
+        const line = terminalRows[terminalRow];
+        const promptEnd = line.join('').lastIndexOf('>');
+        const editableStart = promptEnd >= 0 ? promptEnd + 1 : 0;
+        terminalRows[terminalRow] = line.slice(0, editableStart);
+        terminalColumn = editableStart;
+        renderTerminalScreen();
+      }
+
+      async function copyTerminalSelection() {
+        const selectedText = window.getSelection()?.toString() || '';
+        if (!selectedText) return;
+        try {
+          await navigator.clipboard.writeText(selectedText);
+        } catch (error) {
+          const selection = window.getSelection();
+          if (selection) document.execCommand('copy');
+        }
+      }
+
+      async function pasteTerminalClipboard() {
+        try {
+          const clipboardText = await navigator.clipboard.readText();
+          sendTerminalInput(clipboardText);
+        } catch (error) {
+          setStatus('Permissão de colagem negada pelo navegador');
+        }
+      }
+
+      function setStatus(text) {
+        statusLabel.textContent = text;
+      }
+
+      function connectSocket() {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
+
+        socket.onopen = () => {
+          socket.send(JSON.stringify({
+            type: 'ui',
+            role: terminalPopup ? 'terminal' : screenPopup ? 'screen' : filePopup ? 'files' : 'control'
+          }));
+          if (terminalPopup && selectedClientId) sendTerminalControl('open');
+          if (screenPopup && selectedClientId) sendScreenControl('open');
+          if (filePopup && selectedClientId) {
+            sendFileCommand('file_list', { path: filePathInput.value });
+          }
+          if (screenPopup && selectedClientId) {
+            screenVideo.src = `${window.location.origin}/stream/${encodeURIComponent(selectedClientId)}.mp4`;
+            screenVideo.play().catch(() => setStatus('O navegador não conseguiu reproduzir o fluxo H.265'));
+          }
+          setStatus('Conectado ao servidor');
+        };
+
+        socket.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+
+          if (data.type === 'clients') {
+            const clients = data.clients || [];
+            clientDetails = data.details || {};
+            const currentValue = select.value;
+            select.innerHTML = '';
+            clients.forEach((clientId) => {
+              const option = document.createElement('option');
+              option.value = clientId;
+              option.textContent = clientId;
+              if (clientId === currentValue) option.selected = true;
+              select.appendChild(option);
+            });
+
+            if (selectedClientId && clients.includes(selectedClientId)) {
+              select.value = selectedClientId;
+              socket.send(JSON.stringify({ type: 'select_client', client_id: selectedClientId }));
+            } else if (clients.length > 0 && !selectedClientId) {
+              selectedClientId = clients[0];
+              select.value = selectedClientId;
+              socket.send(JSON.stringify({ type: 'select_client', client_id: selectedClientId }));
+            }
+
+            return;
+          }
+
+          if (data.type === 'screen') {
+            currentWidth = data.width || currentWidth;
+            currentHeight = data.height || currentHeight;
+            canvas.width = currentWidth;
+            canvas.height = currentHeight;
+
+            const image = new Image();
+            image.onload = () => {
+              ctx.clearRect(0, 0, canvas.width, canvas.height);
+              ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+            };
+            image.src = `data:image/jpeg;base64,${data.frame}`;
+            return;
+          }
+
+          if (data.type === 'terminal_output') {
+            if (!terminalOpen || data.client_id !== selectedClientId) return;
+            writeTerminalOutput(data.data || '');
+            return;
+          }
+
+          if (data.type === 'file_list_result') {
+            renderFileList(data);
+            return;
+          }
+
+          if (data.type === 'file_transfer_start' && data.direction === 'download') {
+            downloadBuffers.set(data.transfer_id, { name: data.name, chunks: [] });
+            return;
+          }
+
+          if (data.type === 'file_transfer_chunk' && data.direction === 'download') {
+            const transfer = downloadBuffers.get(data.transfer_id);
+            if (transfer) transfer.chunks.push(data.data);
+            return;
+          }
+
+          if (data.type === 'file_transfer_end' && data.direction === 'download') {
+            const transfer = downloadBuffers.get(data.transfer_id);
+            if (transfer) {
+              const bytes = Uint8Array.from(atob(transfer.chunks.join('')), character => character.charCodeAt(0));
+              const blob = new Blob([bytes]);
+              const link = document.createElement('a');
+              link.href = URL.createObjectURL(blob);
+              link.download = transfer.name;
+              link.click();
+              URL.revokeObjectURL(link.href);
+              downloadBuffers.delete(data.transfer_id);
+            }
+            return;
+          }
+
+          if (data.type === 'file_transfer_result' || data.type === 'file_transfer_error') {
+            setStatus(data.error || `Transferência ${data.status || 'finalizada'}`);
+            return;
+          }
+        };
+
+        socket.onclose = () => {
+          setStatus('Conexão fechada');
+        };
+      }
+
+      document.getElementById('connectBtn').addEventListener('click', () => {
+        const clientId = select.value;
+        if (!clientId) return;
+        selectedClientId = clientId;
+        socket.send(JSON.stringify({ type: 'select_client', client_id: clientId }));
+        setStatus(`Monitorando ${clientId}`);
+      });
+
+      select.addEventListener('change', () => {
+        if (terminalOpen) closeTerminal();
+        selectedClientId = select.value;
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'select_client', client_id: selectedClientId }));
+        }
+      });
+
+      fullscreenBtn.addEventListener('click', async () => {
+        if (document.fullscreenElement) {
+          await document.exitFullscreen();
+        } else {
+          await screenWrapper.requestFullscreen();
+        }
+      });
+
+      document.addEventListener('fullscreenchange', () => {
+        fullscreenBtn.textContent = document.fullscreenElement ? 'Sair da tela cheia' : 'Tela cheia';
+      });
+
+      function sendTerminalControl(action) {
+        if (!socket || !selectedClientId || socket.readyState !== WebSocket.OPEN) return;
+        socket.send(JSON.stringify({
+          type: 'terminal_control',
+          client_id: selectedClientId,
+          action
+        }));
+      }
+
+      function sendScreenControl(action) {
+        if (!socket || !selectedClientId || socket.readyState !== WebSocket.OPEN) return;
+        socket.send(JSON.stringify({
+          type: 'screen_control',
+          client_id: selectedClientId,
+          action
+        }));
+      }
+
+      function sendFileCommand(type, payload = {}) {
+        if (!socket || !selectedClientId || socket.readyState !== WebSocket.OPEN) return false;
+        socket.send(JSON.stringify({ type, client_id: selectedClientId, ...payload }));
+        return true;
+      }
+
+      function renderFileList(data) {
+        filePathInput.value = data.path || filePathInput.value;
+        fileList.textContent = '';
+        if (data.error) {
+          fileList.textContent = data.error;
+          return;
+        }
+        data.entries.forEach((entry) => {
+          const row = document.createElement('div');
+          row.className = 'file-row';
+          const name = document.createElement('span');
+          name.textContent = `${entry.is_dir ? '[DIR] ' : ''}${entry.name}`;
+          row.appendChild(name);
+          const action = document.createElement('button');
+          action.type = 'button';
+          action.textContent = entry.is_dir ? 'Abrir' : 'Baixar';
+          action.addEventListener('click', () => {
+            if (entry.is_dir) {
+              filePathInput.value = entry.path;
+              listFilesBtn.click();
+            } else {
+              sendFileCommand('file_download', {
+                path: entry.path,
+                transfer_id: `${Date.now()}-${Math.random().toString(16).slice(2)}`
+              });
+            }
+          });
+          row.appendChild(action);
+          fileList.appendChild(row);
+        });
+      }
+
+      listFilesBtn.addEventListener('click', () => {
+        sendFileCommand('file_list', {
+          path: filePathInput.value,
+          request_id: `${Date.now()}-${Math.random().toString(16).slice(2)}`
+        });
+      });
+
+      installFfmpegBtn.addEventListener('click', () => {
+        if (sendFileCommand('ffmpeg_install')) setStatus('Enviando FFmpeg para o cliente...');
+      });
+
+      uploadFileBtn.addEventListener('click', async () => {
+        const file = uploadFileInput.files[0];
+        const destination = uploadDestination.value.trim();
+        if (!file || !destination || !selectedClientId) return;
+        const transferId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        sendFileCommand('file_transfer_start', { transfer_id: transferId, destination, size: file.size });
+        for (let offset = 0; offset < file.size; offset += 64 * 1024) {
+          const chunk = await file.slice(offset, offset + 64 * 1024).arrayBuffer();
+          const bytes = new Uint8Array(chunk);
+          let binary = '';
+          bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+          sendFileCommand('file_transfer_chunk', { transfer_id: transferId, data: btoa(binary) });
+        }
+        sendFileCommand('file_transfer_end', { transfer_id: transferId });
+        setStatus('Arquivo enviado para o cliente');
+      });
+
+      function openTerminal() {
+        if (terminalOpen || !selectedClientId || !socket || socket.readyState !== WebSocket.OPEN) return;
+        const details = clientDetails[selectedClientId] || {};
+        const query = new URLSearchParams({
+          terminal: '1',
+          client_id: selectedClientId,
+          user: details.user || 'unknown',
+          ip: details.ip || 'unknown'
+        });
+        window.open(
+          `${window.location.pathname}?${query.toString()}`,
+          'remote_terminal',
+          'popup=yes,width=1000,height=700,resizable=yes,scrollbars=no'
+        );
+      }
+
+      function closeTerminal() {
+        if (terminalPopup) {
+          if (terminalOpen) {
+            terminalOpen = false;
+            sendTerminalControl('close');
+          }
+          window.close();
+          return;
+        }
+        if (!terminalOpen) {
+          if (terminalDialog.open) terminalDialog.close();
+          return;
+        }
+        terminalOpen = false;
+        sendTerminalControl('close');
+        terminalDialog.close();
+      }
+
+      terminalBtn.addEventListener('click', openTerminal);
+      screenBtn.addEventListener('click', () => {
+        if (!selectedClientId || !socket || socket.readyState !== WebSocket.OPEN) return;
+        socket.send(JSON.stringify({
+          type: 'screen_control',
+          client_id: selectedClientId,
+          action: 'open',
+          use_ffmpeg: useFfmpeg.checked
+        }));
+        setStatus(`Abrindo tela de ${selectedClientId}`);
+      });
+      cameraBtn.addEventListener('click', () => {
+        if (!selectedClientId || !socket || socket.readyState !== WebSocket.OPEN) return;
+        socket.send(JSON.stringify({
+          type: 'camera_control',
+          client_id: selectedClientId,
+          action: 'open'
+        }));
+        setStatus(`Abrindo câmera de ${selectedClientId}`);
+      });
+      filesBtn.addEventListener('click', () => {
+        if (!selectedClientId || !socket || socket.readyState !== WebSocket.OPEN) return;
+        const details = clientDetails[selectedClientId] || {};
+        const query = new URLSearchParams({
+          files: '1',
+          client_id: selectedClientId,
+          user: details.user || 'unknown',
+          ip: details.ip || 'unknown'
+        });
+        window.open(
+          `${window.location.pathname}?${query.toString()}`,
+          'remote_files',
+          'popup=yes,width=1100,height=750,resizable=yes,scrollbars=yes'
+        );
+      });
+      screenVideo.addEventListener('error', () => {
+        if (screenPopup) setStatus('FFmpeg/H.265 indisponível ou não suportado pelo navegador');
+      });
+      closeTerminalBtn.addEventListener('click', closeTerminal);
+      window.addEventListener('beforeunload', () => {
+        if (terminalPopup && terminalOpen) {
+          sendTerminalControl('close');
+        }
+        if (screenPopup && screenOpen) {
+          screenOpen = false;
+          sendScreenControl('close');
+        }
+      });
+      terminalDialog.addEventListener('cancel', (event) => {
+        event.preventDefault();
+        closeTerminal();
+      });
+
+      function sendTerminalInput(data) {
+        if (!terminalOpen || !data || !socket || !selectedClientId || socket.readyState !== WebSocket.OPEN) return;
+        socket.send(JSON.stringify({
+          type: 'terminal_input',
+          client_id: selectedClientId,
+          data
+        }));
+      }
+
+      terminalOutput.addEventListener('keydown', (event) => {
+        event.stopPropagation();
+        let data = '';
+        const key = event.key;
+
+        if ((event.ctrlKey || event.metaKey) && event.shiftKey && key.toLowerCase() === 'c') {
+          event.preventDefault();
+          copyTerminalSelection();
+          return;
+        }
+
+        if ((event.ctrlKey || event.metaKey) && event.shiftKey && key.toLowerCase() === 'v') {
+          return;
+        }
+
+        event.preventDefault();
+
+        if (key === 'ArrowUp' || key === 'ArrowDown') prepareHistoryNavigation();
+
+        if (event.ctrlKey || event.metaKey) {
+          if (key === ' ') {
+            data = '\u0000';
+          } else if (key === 'Backspace') {
+            data = '\u0017';
+          } else if (key.length === 1) {
+            data = String.fromCharCode(key.toUpperCase().charCodeAt(0) - 64);
+          }
+        } else if (event.altKey && key.length === 1) {
+          data = `\u001b${key}`;
+        } else {
+          const keyMap = {
+            Enter: '\r',
+            Backspace: '\u007f',
+            Tab: '\t',
+            Escape: '\u001b',
+            ArrowUp: '\u001b[A',
+            ArrowDown: '\u001b[B',
+            ArrowRight: '\u001b[C',
+            ArrowLeft: '\u001b[D',
+            Delete: '\u001b[3~',
+            Home: '\u001b[H',
+            End: '\u001b[F',
+            PageUp: '\u001b[5~',
+            PageDown: '\u001b[6~',
+            Insert: '\u001b[2~',
+            F1: '\u001bOP',
+            F2: '\u001bOQ',
+            F3: '\u001bOR',
+            F4: '\u001bOS',
+            F5: '\u001b[15~',
+            F6: '\u001b[17~',
+            F7: '\u001b[18~',
+            F8: '\u001b[19~',
+            F9: '\u001b[20~',
+            F10: '\u001b[21~',
+            F11: '\u001b[23~',
+            F12: '\u001b[24~'
+          };
+          data = keyMap[key] || (key.length === 1 ? key : '');
+        }
+
+        sendTerminalInput(data);
+      });
+
+      terminalOutput.addEventListener('paste', (event) => {
+        event.preventDefault();
+        sendTerminalInput(event.clipboardData.getData('text'));
+      });
+
+      terminalOutput.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        pasteTerminalClipboard();
+      });
+
+      terminalOutput.addEventListener('click', () => terminalOutput.focus());
+      clearTerminalBtn.addEventListener('click', () => {
+        resetTerminalScreen();
+        terminalOutput.focus();
+      });
+
+      if (terminalPopup) {
+        terminalDialog.open = true;
+        terminalOutput.focus();
+      }
+
+      function getCanvasCoordinates(event) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = currentWidth / rect.width;
+        const scaleY = currentHeight / rect.height;
+        return {
+          x: (event.clientX - rect.left) * scaleX,
+          y: (event.clientY - rect.top) * scaleY
+        };
+      }
+
+      canvas.addEventListener('mousemove', (event) => {
+        if (!socket || !selectedClientId || socket.readyState !== WebSocket.OPEN) return;
+        const { x, y } = getCanvasCoordinates(event);
+        socket.send(JSON.stringify({
+          type: 'mouse',
+          client_id: selectedClientId,
+          action: 'move',
+          x,
+          y,
+          button: 'left'
+        }));
+      });
+
+      canvas.addEventListener('click', (event) => {
+        if (!socket || !selectedClientId || socket.readyState !== WebSocket.OPEN) return;
+        const { x, y } = getCanvasCoordinates(event);
+        socket.send(JSON.stringify({
+          type: 'mouse',
+          client_id: selectedClientId,
+          action: 'click',
+          x,
+          y,
+          button: 'left'
+        }));
+      });
+
+      canvas.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        if (!socket || !selectedClientId || socket.readyState !== WebSocket.OPEN) return;
+        const { x, y } = getCanvasCoordinates(event);
+        socket.send(JSON.stringify({
+          type: 'mouse',
+          client_id: selectedClientId,
+          action: 'right_click',
+          x,
+          y,
+          button: 'right'
+        }));
+      });
+
+      canvas.addEventListener('wheel', (event) => {
+        if (!socket || !selectedClientId || socket.readyState !== WebSocket.OPEN) return;
+        event.preventDefault();
+        socket.send(JSON.stringify({
+          type: 'scroll',
+          client_id: selectedClientId,
+          amount: event.deltaY > 0 ? 120 : -120
+        }));
+      });
+
+      document.addEventListener('keydown', (event) => {
+        if (!socket || !selectedClientId || socket.readyState !== WebSocket.OPEN) return;
+        if (event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+        if (event.target === document.body) event.preventDefault();
+
+        const modifiers = [];
+        if (event.ctrlKey) modifiers.push('ctrl');
+        if (event.altKey) modifiers.push('alt');
+        if (event.metaKey) modifiers.push('win');
+        if (event.shiftKey) modifiers.push('shift');
+
+        if (modifiers.length > 0 && !['Control', 'Alt', 'Meta', 'Shift'].includes(event.key)) {
+          const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+          socket.send(JSON.stringify({
+            type: 'shortcut',
+            client_id: selectedClientId,
+            keys: [...modifiers, key]
+          }));
+          return;
+        }
+
+        if (['Alt', 'Control', 'Meta', 'Shift'].includes(event.key)) return;
+        socket.send(JSON.stringify({
+          type: 'keyboard',
+          client_id: selectedClientId,
+          key: event.key,
+          text: event.key.length === 1 ? event.key : ''
+        }));
+      });
+
+      connectSocket();
+    </script>
+  </body>
+</html>
